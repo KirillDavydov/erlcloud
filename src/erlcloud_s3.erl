@@ -39,7 +39,7 @@
          get_bucket_and_key/1,
          list_bucket_inventory/1, list_bucket_inventory/2, list_bucket_inventory/3,
          get_bucket_inventory/2, get_bucket_inventory/3,
-         put_bucket_inventory/2, put_bucket_inventory/3,
+         put_bucket_inventory/1, put_bucket_inventory/2, put_bucket_inventory/3,
          delete_bucket_inventory/2, delete_bucket_inventory/3
     ]).
 
@@ -1357,10 +1357,16 @@ get_bucket_inventory(BucketName, InventoryId, #aws_config{} = Config)
     Params = [{"id", InventoryId}],
     case s3_request2(Config, get, BucketName, "/", "inventory", Params, <<>>, []) of
         {ok, {_Headers, Body}} ->
+            error_logger:info_report(Body),
             {ok, extract_inventory_configuration(element(1, xmerl_scan:string(binary_to_list(Body))))};
         Error ->
             Error
     end.
+
+
+put_bucket_inventory(#aws_config{} = Config) ->
+    Inventory = <<"<InventoryConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Schedule><Frequency>Daily</Frequency></Schedule><IsEnabled>true</IsEnabled><Destination><S3BucketDestination><Prefix>pr</Prefix><Bucket>arn:aws:s3:::crr-inventory-w2</Bucket><Format>CSV</Format></S3BucketDestination></Destination><OptionalFields><Field>Size</Field><Field>LastModifiedDate</Field><Field>StorageClass</Field><Field>ETag</Field><Field>ReplicationStatus</Field><Field>IsMultipartUploaded</Field></OptionalFields><Filter><Prefix>dd</Prefix></Filter><IncludedObjectVersions>All</IncludedObjectVersions><Id>report1</Id></InventoryConfiguration>">>,
+    put_bucket_inventory("alxxxx-us-w2-kdavydov-logmsgs-000000", "report1", Inventory, Config).
 
 -spec put_bucket_inventory(string(), list()) -> ok | {error, Reason::term()}.
 put_bucket_inventory(BucketName, Inventory)
@@ -1383,9 +1389,9 @@ put_bucket_inventory(BucketName, InventoryId, XmlInventory, #aws_config{} = Conf
     when is_list(BucketName), is_list(InventoryId), is_binary(XmlInventory) ->
     Md5 = base64:encode(crypto:hash(md5, XmlInventory)),
     Params = [{"id", InventoryId}],
-    s3_simple_request(
-        Config, put, BucketName, "/", "inventory", Params, XmlInventory, [{"Content-MD5", Md5}]
-    ).
+    Headers = [{"Content-MD5", Md5}, {"content-type", "application/xml"}],
+    error_logger:info_report(XmlInventory),
+    s3_simple_request(Config, put, BucketName, "/", "inventory", Params, XmlInventory, Headers).
 
 -spec delete_bucket_inventory(string(), string()) -> ok | {error, Reason::term()}.
 delete_bucket_inventory(BucketName, InventoryId) when is_list(BucketName), is_list(InventoryId) ->
@@ -1400,7 +1406,14 @@ delete_bucket_inventory(BucketName, InventoryId, #aws_config{} = Config)
 
 encode_inventory(Inventory) ->
     lists:flatten(
-        xmerl:export_simple([{'InventoryConfiguration', inv_encode_subtype(Inventory)}], xmerl_xml)
+        xmerl:export_simple(
+            [{
+                'InventoryConfiguration',
+                [{xmlns, "http://s3.amazonaws.com/doc/2006-03-01/"}],
+                inv_encode_subtype(Inventory)
+            }],
+            xmerl_xml
+        )
     ).
 
 inv_encode_subtype([{_, _} | _] = Proplist) ->
